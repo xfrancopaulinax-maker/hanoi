@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planificación Frontal Progresiva (Torre de Hanói)</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#f4f6f8;margin:0;padding:16px;color:#222}
+  h1{font-size:1.2rem;margin:0 0 8px}
+  .barra{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  select,button{font-size:1rem;padding:8px 12px;border-radius:8px;border:1px solid #999;cursor:pointer}
+  button.pri{background:#2563eb;color:#fff;border-color:#2563eb}
+  #consigna{background:#fff;border-left:5px solid #2563eb;padding:10px;border-radius:6px;margin-bottom:10px}
+  #estado{display:flex;gap:18px;flex-wrap:wrap;font-weight:600;margin-bottom:8px}
+  #aviso{min-height:1.6em;font-weight:700}
+  #torres{display:flex;gap:20px;justify-content:center;background:#fff;padding:20px;border-radius:12px}
+  .poste{position:relative;width:200px;height:220px;display:flex;flex-direction:column-reverse;align-items:center;
+         cursor:pointer;border:3px solid transparent;border-radius:10px;padding-bottom:4px;box-sizing:border-box}
+  .poste::before{content:"";position:absolute;bottom:0;width:10px;height:100%;background:#8b5e3c;border-radius:5px;z-index:0}
+  .poste.sel{border-color:#2563eb;background:#eaf1ff}
+  .poste.marca{border-color:#dc2626;background:#fee2e2}
+  .poste .et{position:absolute;top:-22px;font-weight:700}
+  .disco{height:26px;border-radius:13px;margin-top:2px;z-index:1;display:flex;align-items:center;justify-content:center;
+         box-shadow:0 1px 3px #0005}
+  #meta{margin-top:12px;background:#fff;padding:10px;border-radius:12px;display:none}
+  .mini{display:flex;gap:14px;justify-content:center}
+  .mp{width:90px;height:100px;display:flex;flex-direction:column-reverse;align-items:center;position:relative}
+  .mp::before{content:"";position:absolute;bottom:0;width:5px;height:100%;background:#8b5e3c}
+  .md{height:13px;border-radius:7px;margin-top:1px;z-index:1}
+  #resultado{margin-top:12px;background:#fff;padding:12px;border-radius:12px;display:none;white-space:pre-wrap;font-family:monospace}
+  #grande{font-size:2.4rem;text-align:center;font-weight:800;color:#2563eb;min-height:3rem}
+</style>
+</head>
+<body>
+<h1>Programa de Intervención Clínica: Planificación Frontal Progresiva</h1>
+
+<div class="barra">
+  <label>Nivel: <select id="selNivel"></select></label>
+  <button class="pri" id="btnIniciar">Iniciar ejercicio</button>
+  <button id="btnReiniciar">Reiniciar</button>
+</div>
+
+<div id="consigna"></div>
+<div id="estado">
+  <span>Tiempo: <b id="tTiempo">0.0</b> s</span>
+  <span>Movimientos: <b id="tMov">0</b> / <b id="tMax">-</b></span>
+  <span>Ilegales: <b id="tIleg">0</b></span>
+</div>
+<div id="grande"></div>
+<div id="aviso"></div>
+<div id="torres"></div>
+<div id="meta"><div style="text-align:center;font-weight:700;margin-bottom:6px">Tarjeta meta</div><div class="mini" id="miniMeta"></div></div>
+<div id="resultado"></div>
+
+<script>
+/* ================= CONFIGURACIÓN DE NIVELES =================
+ discos: nº de discos | ini/meta: postes A,B,C (de abajo hacia arriba; 1 = más pequeño)
+ tol: movimientos extra permitidos sobre el óptimo (calculado automáticamente) o maxMov fijo
+ tiempo: límite en segundos | latencia: segundos de planificación sin tocar
+ tarjeta: segundos que se muestra la meta antes de ocultarla
+ capB: máx. discos en poste B | prohibido: {disco, poste} | sinRetroceso: true/false
+ ileg: {max, consec} -> criterio de cese por movimientos ilegales
+ inhibe: true -> tocar durante la latencia termina la prueba                       */
+const NIVELES = [
+ {discos:2, ini:[[2,1],[],[]], meta:[[],[],[2,1]], tol:0, tiempo:180, ileg:{max:3,consec:true},
+  consigna:"Consigue que los discos queden exactamente como en la tarjeta meta en un máximo de 2 o 3 movimientos."},
+ {discos:2, ini:[[2,1],[],[]], meta:[[],[2,1],[]], tol:1, tiempo:180, ileg:{max:3,consec:true},
+  consigna:"Debes mover toda la torre al poste central (B) en 3 movimientos exactos."},
+ {discos:3, ini:[[3,2],[1],[]], meta:[[],[],[3,2,1]], tol:2, tiempo:240, ileg:{max:3,consec:false},
+  consigna:"Lleva todos los discos al poste C para formar la torre completa."},
+ {discos:3, ini:[[3,2,1],[],[]], meta:[[],[3,2,1],[]], tol:1, tiempo:210, tarjeta:8, ileg:{max:1,consec:false},
+  consigna:"Memoriza la posición final. Tienes 8 segundos. Ahora, reproduce la figura en el poste B."},
+ {discos:3, ini:[[3,2,1],[],[]], meta:[[],[],[3,2,1]], tol:1, tiempo:300, sinRetroceso:true, ileg:{max:3,consec:false},
+  consigna:"Traspasa la torre entera al poste C. Necesitarás 7 pasos. No puedes deshacer el movimiento que acabas de hacer."},
+ {discos:3, ini:[[3,2,1],[],[]], meta:[[],[],[3,2,1]], tol:2, tiempo:300, capB:2, marcaB:true, ileg:{max:1,consec:false},
+  consigna:"Arma la torre en C. Recuerda la regla especial: el poste B (zona estrecha) tiene capacidad limitada."},
+ {discos:4, ini:[[4],[3,1],[2]], meta:[[4,3,2,1],[],[]], maxMov:9, tiempo:600, ileg:{max:3,consec:false},
+  consigna:"Ordena los 4 discos en el poste A para formar la torre completa. Máximo 9 movimientos."},
+ {discos:4, ini:[[4,3,2,1],[],[]], meta:[[],[],[4,3,2,1]], tol:2, tiempo:600, latencia:30, inhibe:true, ileg:{max:3,consec:false},
+  consigna:"Durante 30 segundos no puedes tocar nada. Dime verbalmente tus primeros 3 movimientos."},
+ {discos:4, ini:[[4,3,2,1],[],[]], meta:[[],[],[4,3,2,1]], maxMov:18, tiempo:420, prohibido:{disco:4,poste:1}, marcaB:true, ileg:{max:1,consec:false},
+  consigna:"El disco más grande NUNCA puede tocar el poste B. Límite de 18 movimientos."},
+ {discos:5, ini:[[5,4,3,2,1],[],[]], meta:[[],[],[5,4,3,2,1]], tol:2, tiempo:180, latencia:45, inhibe:true, ileg:{max:3,consec:false},
+  consigna:"45 segundos para analizar sin tocar. Luego tienes 3 minutos para trasladar la torre al poste C. Más de 2 errores y termina."}
+];
+const NOMBRES = ["A","B","C"];
+
+/* ================= UTILIDADES ================= */
+const $ = id => document.getElementById(id);
+let L, state, sel, moves, illeg, consec, lastMove, phase, t0, firstLat, maxMov, optimo, log, timer, countdown;
+
+function copia(s){ return s.map(p => p.slice()); }
+
+function validar(s, from, to, nivel, last){ // devuelve texto del error o null
+  if (!s[from].length) return "Poste de origen vacío";
+  const d = s[from][s[from].length-1];
+  const top = s[to][s[to].length-1];
+  if (top !== undefined && top < d) return "Un disco grande no puede cubrir a uno más pequeño";
+  if (nivel.capB && to === 1 && s[1].length >= nivel.capB) return "Poste B excede su capacidad";
+  if (nivel.prohibido && d === nivel.prohibido.disco && to === nivel.prohibido.poste) return "Disco prohibido en el poste B";
+  if (nivel.sinRetroceso && last && last.disc === d && last.from === to) return "Movimiento de retroceso no permitido";
+  return null;
+}
+
+function bfs(nivel){ // movimientos óptimos con las reglas del nivel
+  const key = s => JSON.stringify(s), meta = key(nivel.meta);
+  const ini = copia(nivel.ini), vis = new Set([key(ini)]);
+  let q = [[ini,0]];
+  while (q.length){
+    const [s,n] = q.shift();
+    if (key(s) === meta) return n;
+    for (let a=0;a<3;a++) for (let b=0;b<3;b++){
+      if (a===b || validar(s,a,b,{...nivel,sinRetroceso:false},null)) continue;
+      const t = copia(s); t[b].push(t[a].pop());
+      const k = key(t);
+      if (!vis.has(k)){ vis.add(k); q.push([t,n+1]); }
+    }
+  }
+  return null;
+}
+
+/* ================= RENDER ================= */
+function color(s){ return `hsl(${s*55},70%,55%)`; }
+
+function render(){
+  const cont = $("torres"); cont.innerHTML = "";
+  state.forEach((p,i)=>{
+    const d = document.createElement("div");
+    d.className = "poste" + (sel===i?" sel":"") + (L.marcaB && i===1 ? " marca":"");
+    p.forEach(s=>{
+      const x = document.createElement("div");
+      x.className = "disco"; x.style.width = (34+s*30)+"px"; x.style.background = color(s);
+      if (L.prohibido && s===L.prohibido.disco) x.textContent = "🚫";
+      d.appendChild(x);
+    });
+    const et = document.createElement("div"); et.className="et"; et.textContent = NOMBRES[i];
+    d.appendChild(et);
+    d.onclick = () => clickPoste(i);
+    cont.appendChild(d);
+  });
+  $("tMov").textContent = moves; $("tIleg").textContent = illeg;
+}
+
+function renderMeta(visible){
+  $("meta").style.display = visible ? "block" : "none";
+  const m = $("miniMeta"); m.innerHTML = "";
+  L.meta.forEach(p=>{
+    const d = document.createElement("div"); d.className="mp";
+    p.forEach(s=>{ const x=document.createElement("div"); x.className="md"; x.style.width=(18+s*13)+"px"; x.style.background=color(s); d.appendChild(x); });
+    m.appendChild(d);
+  });
+}
+
+function aviso(txt, ok){ const a=$("aviso"); a.textContent=txt; a.style.color = ok ? "#15803d" : "#b91c1c"; }
+
+/* ================= FLUJO ================= */
+function cargarNivel(){
+  clearInterval(timer); clearInterval(countdown);
+  const idx = +$("selNivel").value;
+  L = NIVELES[idx];
+  state = copia(L.ini); sel = null; moves = 0; illeg = 0; consec = 0; lastMove = null;
+  firstLat = null; log = []; phase = "idle"; $("grande").textContent = ""; aviso("");
+  optimo = bfs(L);
+  maxMov = L.maxMov || (optimo === null ? null : optimo + L.tol);
+  $("tMax").textContent = maxMov ?? "∞"; $("tTiempo").textContent = "0.0";
+  $("consigna").innerHTML = `<b>Nivel ${idx+1}/10</b> — ${L.consigna}<br><small>Movimientos óptimos calculados: ${optimo ?? "sin solución con estas reglas"} | Tiempo límite: ${L.tiempo}s</small>`;
+  $("resultado").style.display = "none";
+  renderMeta(true); render();
+}
+
+function iniciar(){
+  cargarNivel();
+  if (L.tarjeta){ // desvanecimiento de pista visual
+    let r = L.tarjeta; phase = "tarjeta";
+    $("grande").textContent = r;
+    countdown = setInterval(()=>{
+      r--; $("grande").textContent = r > 0 ? r : "";
+      if (r <= 0){ clearInterval(countdown); renderMeta(false); empezarJuego(); }
+    },1000);
+  } else if (L.latencia){ // latencia forzada sin tocar
+    let r = L.latencia; phase = "latencia";
+    aviso("NO TOQUES LAS PIEZAS. Planifica mentalmente.", false);
+    $("grande").textContent = r;
+    countdown = setInterval(()=>{
+      r--; $("grande").textContent = r > 0 ? r : "";
+      if (r <= 0){ clearInterval(countdown); aviso("¡Ya puedes empezar!", true); empezarJuego(); }
+    },1000);
+  } else empezarJuego();
+}
+
+function empezarJuego(){
+  phase = "juego"; t0 = performance.now();
+  timer = setInterval(()=>{
+    const e = (performance.now()-t0)/1000;
+    $("tTiempo").textContent = e.toFixed(1);
+    if (e >= L.tiempo) terminar(false, "Se agotó el tiempo límite");
+  },100);
+}
+
+function clickPoste(i){
+  if (phase === "latencia" && L.inhibe) return terminar(false, "Error de inhibición: tocó el material antes de tiempo", true);
+  if (phase !== "juego") return;
+  if (sel === null){ if (state[i].length){ sel = i; } }
+  else if (sel === i){ sel = null; }
+  else { intentar(sel, i); sel = null; }
+  render();
+}
+
+function intentar(from, to){
+  const err = validar(state, from, to, L, lastMove);
+  const t = ((performance.now()-t0)/1000).toFixed(2);
+  if (err){
+    illeg++; consec++;
+    log.push(`${t}s  ILEGAL ${NOMBRES[from]}→${NOMBRES[to]}: ${err}`);
+    aviso("Movimiento no permitido: " + err, false);
+    const cese = L.ileg.consec ? consec >= L.ileg.max : illeg >= L.ileg.max;
+    if (cese) terminar(false, "Se alcanzó el criterio de cese por movimientos ilegales");
+    return;
+  }
+  const disc = state[from].pop(); state[to].push(disc);
+  if (firstLat === null) firstLat = (performance.now()-t0)/1000;
+  moves++; consec = 0; lastMove = {disc, from, to};
+  log.push(`${t}s  mov ${moves}: ${NOMBRES[from]}→${NOMBRES[to]} (disco ${disc})`);
+  aviso("");
+  if (JSON.stringify(state) === JSON.stringify(L.meta)) return terminar(true, "Meta alcanzada");
+  if (maxMov !== null && moves >= maxMov) terminar(false, "Se alcanzó el límite de movimientos");
+}
+
+function terminar(exito, motivo, sinLatencia){
+  clearInterval(timer); clearInterval(countdown);
+  phase = "fin"; render(); renderMeta(true);
+  const e = sinLatencia ? 0 : ((performance.now()-t0)/1000);
+  aviso((exito ? "✔ " : "✖ ") + motivo, exito);
+  const r = $("resultado"); r.style.display = "block";
+  r.textContent =
+`RESULTADO — Nivel ${+$("selNivel").value+1}/10
+Resultado: ${exito ? "ÉXITO" : "FRACASO/CESE"} (${motivo})
+Latencia al primer movimiento: ${firstLat===null ? "—" : firstLat.toFixed(2)+" s"}
+Tiempo total de ejecución: ${e.toFixed(1)} s
+Movimientos realizados: ${moves} (óptimo: ${optimo}, límite: ${maxMov ?? "—"})
+Movimientos ilegales: ${illeg}
+Eficiencia (óptimo/realizados): ${moves ? (optimo/moves*100).toFixed(0)+"%" : "—"}
+
+REGISTRO:
+${log.join("\n")}`;
+}
+
+/* ================= ARRANQUE ================= */
+NIVELES.forEach((_,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=`Nivel ${i+1}`; $("selNivel").appendChild(o); });
+$("selNivel").onchange = cargarNivel;
+$("btnIniciar").onclick = iniciar;
+$("btnReiniciar").onclick = cargarNivel;
+cargarNivel();
+</script>
+</body>
+</html>
